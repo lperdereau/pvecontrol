@@ -26,12 +26,16 @@ configtemplate = {
             'host': str,
             'user': str,
             'password': str,
+            'node_factors': confuse.Optional({
+                'cpufactor': confuse.Optional(float, None),
+                'memoryminimum': confuse.Optional(int, None)
+            }, default={})
         }
     ),
-    'node': {
+    'node_factors': {
         'cpufactor': float,
         'memoryminimum': int
-      }
+    }
 }
 
 config = confuse.LazyConfig('pvecontrol', __name__)
@@ -126,7 +130,7 @@ def action_nodeevacuate(proxmox, args):
       logging.debug("VM %i is not running, skipping"%(vm.vmid))
       continue
     # check ressources
-    for target in targets: 
+    for target in targets:
       logging.debug("Test target: %s, allocatedmem: %i, allocatedcpu: %i"%(target.node, target.allocatedmem, target.allocatedcpu))
       if (vm.maxmem + target.allocatedmem) > (target.maxmem - validconfig.node.memoryminimum):
         logging.debug("Discard target: %s, will overcommit ram"%(target.node))
@@ -140,7 +144,7 @@ def action_nodeevacuate(proxmox, args):
         break
     else:
       print("No target found for VM %s"%vm.vmid)
-      
+
 
   logging.debug(plan)
   # validate input
@@ -279,11 +283,17 @@ def _print_task(proxmox, upid, follow = False):
 def action_sanitycheck(proxmox, args):
   """Check status of proxmox Cluster"""
   # check cpu allocation factor
+  clusterconfig = [c for c in validconfig.clusters if c.name == proxmox.name][0]
+
+  node_factors = validconfig.node_factors
+  for k, v in clusterconfig.node_factors.items():
+    node_factors[k] = node_factors.get(k, v)
+
   for node in proxmox.nodes:
-    if (node.maxcpu * validconfig.node.cpufactor) <= node.allocatedcpu:
-      print("Node %s is in cpu overcommit status: %s allocated but %s available"%(node.node, node.allocatedcpu, node.maxcpu))
-    if (node.allocatedmem + validconfig.node.memoryminimum) >= node.maxmem:
-      print("Node %s is in mem overcommit status: %s allocated but %s available"%(node.node, node.allocatedmem, node.maxmem))
+    if (node.maxcpu * node_factors['cpufactor']) <= node.allocatedcpu:
+      print("Node %s is in cpu overcommit status: %s allocated but %s available" % (node.node, node.allocatedcpu, node.maxcpu))
+    if (node.allocatedmem + node_factors['memoryminimum']) >= node.maxmem:
+      print("Node %s is in mem overcommit status: %s allocated but %s available" % (node.node, node.allocatedmem, node.maxmem))
   # More checks to implement
   # VM is started but 'startonboot' not set
   # VM is running in cpu = host
@@ -304,7 +314,7 @@ def _parser():
   # clusterstatus parser
   parser_clusterstatus = subparsers.add_parser('clusterstatus', help='Show cluster status')
   parser_clusterstatus.set_defaults(func=action_clusterstatus)
-  
+
   # nodelist parser
   parser_nodelist = subparsers.add_parser('nodelist', help='List nodes in the cluster')
   parser_nodelist.set_defaults(func=action_nodelist)
@@ -343,7 +353,6 @@ def _parser():
   parser_sanitycheck = subparsers.add_parser('sanitycheck', help='Run Sanity checks on the cluster')
   parser_sanitycheck.set_defaults(func=action_sanitycheck)
 
-
   # _test parser, hidden from help
   parser_test = subparsers.add_parser('_test')
   parser_test.set_defaults(func=action_test)
@@ -360,7 +369,7 @@ def main():
 
   # configure logging
   logging.basicConfig(encoding='utf-8', level=logging.DEBUG if args.debug else logging.INFO)
-  logging.debug("Arguments: %s"%args)  
+  logging.debug("Arguments: %s" % args)
   logging.info("Proxmox cluster: %s" % args.cluster)
 
   # Load configuration file
